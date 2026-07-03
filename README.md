@@ -42,32 +42,3 @@ streamlit run app.py
 ```
 
 Open the local URL shown in the terminal to use the app.
-
-## Input Fields
-
-Enter the following values in the form:
-
-- `age`
-- `income` in `LKR`
-- `loan_amount` in `LKR`
-- `loan_term_months`
-- `employment_years`
-- `home_ownership`
-- `purpose`
-
-`credit_score` and `num_prior_defaults` are calculated internally by the app.
-
-## Dataset Columns
-
-The CSV should include the columns expected by the training pipeline:
-
-- `age`
-- `income`
-- `loan_amount`
-- `loan_term_months`
-- `credit_score`
-- `employment_years`
-- `num_prior_defaults`
-- `home_ownership`
-- `purpose`
-- `default`
