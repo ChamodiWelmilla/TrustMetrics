@@ -71,7 +71,3 @@ The CSV should include the columns expected by the training pipeline:
 - `home_ownership`
 - `purpose`
 - `default`
-
-## 📓 Notes
-
-- `purpose` is shown in the UI for context, but it is not used in the final prediction step.
