@@ -1,14 +1,16 @@
-# Trust Metrics Credit Risk Predictor
+# 🛡️ TrustMetrics Risk Analyzer
 
-A credit risk prediction app built with Streamlit.
+A credit risk prediction and analytics dashboard built with Python and Streamlit. This application evaluates applicant financial profiles and estimates loan default probabilities using an advanced, balanced Support Vector Machine (SVM) pipeline.
 
-## Features
+## ✨ Features
 
-- Simple form-based UI for borrower details
-- Automatic internal estimation of `credit_score` and `num_prior_defaults`
-- Loads `dataset.csv` if it is present in the project folder
-- Falls back to a built-in synthetic dataset if `dataset.csv` is missing
-- Shows model accuracy cards for Logistic Regression and SVM
+- **Modern UI**: A sleek, dark-mode dashboard providing a highly polished user experience.
+- **Dynamic Credit Scoring**: Automatically estimates a FICO-style credit score based on income, employment history, prior unpaid debts, and loan-to-income ratios—removing the need for applicants to know their exact score.
+- **Robust Machine Learning Pipeline**: 
+  - Trained on the `credit_risk_synthetic.csv` dataset.
+  - Automatically handles class imbalances using balanced class weights (`class_weight='balanced'`) to prevent bias.
+  - Strict data leakage prevention using `scikit-learn` Pipelines (scaling is done appropriately during cross-validation).
+- **Interactive Insights**: Provides real-time insights and warnings explaining *why* an applicant was flagged (e.g., low income-to-loan ratio, previous unpaid debts).
 
 ## 🚀 Getting Started
 
@@ -25,20 +27,20 @@ cd TrustMetrics
 pip install -r requirements.txt
 ```
 
-### 3. Prepare the dataset
+### 3. Run the Dashboard
 
-If you want to use your own data, place the file here:
-
-```text
-dataset.csv
-```
-
-If `dataset.csv` is not present, the app will train on a fallback synthetic dataset.
-
-### 4. Run the app
+The machine learning model (`credit_risk_model.pkl`) is already pre-trained and included in the repository. You can launch the Streamlit server directly:
 
 ```bash
 streamlit run app.py
 ```
 
-Open the local URL shown in the terminal to use the app.
+Open the `Local URL` (typically `http://localhost:8501`) shown in your terminal to interact with the Risk Analyzer!
+
+*(Optional)* If you wish to retrain the model from scratch on new data, you can run `python train_model.py` before launching the app.
+
+## 🧰 Project Structure
+- `app.py`: The main Streamlit web application.
+- `train_model.py`: Script to preprocess data and train the ML model.
+- `TrustMetrics.ipynb`: Jupyter Notebook documenting the exploratory data analysis, evaluation fixes, and hyperparameter tuning.
+- `credit_risk_synthetic.csv`: The core synthetic dataset used for training.

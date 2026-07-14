@@ -1,315 +1,156 @@
-from __future__ import annotations
-
-from pathlib import Path
-
-import pandas as pd
 import streamlit as st
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.svm import SVC
+import pandas as pd
+import joblib
+import time
 
+st.set_page_config(
+    page_title="TrustMetrics",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-APP_TITLE = "Trust Metrics💵💹"
-DATA_FILE = Path(__file__).with_name("dataset.csv")
-TRAINING_ROWS = 600
-NUMERIC_FALLBACKS = {
-    "age": (18, 70, 1, 35),
-    "income": (20_000, 590_621, 1_000, 120_000),
-    "loan_amount": (50_000, 1_536_214, 5_000, 250_000),
-    "loan_term_months": (6, 95, 1, 36),
-    "credit_score": (338, 850, 1, 680),
-    "employment_years": (0, 23, 1, 8),
-    "num_prior_defaults": (0, 3, 1, 0),
-}
-DEFAULT_HOME_CHOICES = ["rent", "mortgage", "own"]
-DEFAULT_PURPOSE_CHOICES = ["auto", "education", "business", "home_improvement", "medical", "personal"]
-PURPOSE_LABELS = {
-    "auto": "Auto loan",
-    "education": "Education",
-    "business": "Business",
-    "home_improvement": "Home improvement",
-    "medical": "Medical",
-    "personal": "Personal",
-}
-
-
-st.set_page_config(page_title=APP_TITLE, page_icon="💹", layout="wide")
-
-
-def build_fallback_data() -> pd.DataFrame:
-    rng = pd.Series(range(TRAINING_ROWS))
-    frame = pd.DataFrame(
-        {
-            "age": 18 + (rng * 17 % 53),
-            "income": 20_000 + (rng * 23_417 % 570_621),
-            "loan_amount": 50_000 + (rng * 31_337 % 1_486_214),
-            "loan_term_months": 6 + (rng * 7 % 90),
-            "credit_score": 338 + (rng * 13 % 513),
-            "employment_years": rng * 5 % 24,
-            "num_prior_defaults": rng % 4,
-            "home_ownership": pd.Series([DEFAULT_HOME_CHOICES[i % 3] for i in rng]),
-            "purpose": pd.Series([DEFAULT_PURPOSE_CHOICES[i % len(DEFAULT_PURPOSE_CHOICES)] for i in rng]),
-        }
-    )
-
-    risk_score = (
-        (frame["loan_amount"] / frame["income"]) * 3.0
-        + frame["num_prior_defaults"] * 0.8
-        + (680 - frame["credit_score"]) / 250.0
-        + frame["loan_term_months"] / 120.0
-        - frame["employment_years"] / 30.0
-    )
-    frame["default"] = (risk_score > risk_score.median()).astype(int)
-    return frame
-
-
-@st.cache_data(show_spinner=False)
-def load_data() -> pd.DataFrame:
-    if DATA_FILE.exists():
-        return pd.read_csv(DATA_FILE)
-    return build_fallback_data()
-
-
-def clean_training_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, LabelEncoder]:
-    frame = df.copy()
-
-    if "default" not in frame.columns:
-        raise ValueError("The dataset must include a default column.")
-
-    if "purpose" in frame.columns:
-        frame = frame.drop(columns=["purpose"])
-
-    if "home_ownership" not in frame.columns:
-        raise ValueError("The dataset must include a home_ownership column.")
-
-    feature_columns = [column for column in frame.columns if column != "default"]
-    numeric_columns = [column for column in feature_columns if column != "home_ownership"]
-    frame[numeric_columns] = frame[numeric_columns].apply(pd.to_numeric, errors="coerce")
-    frame["default"] = pd.to_numeric(frame["default"], errors="coerce")
-    frame = frame.dropna(subset=feature_columns + ["default"])
-
-    home_encoder = LabelEncoder()
-    frame["home_ownership"] = home_encoder.fit_transform(frame["home_ownership"].astype(str))
-
-    X = frame.drop(columns=["default"])
-    std = X.std(ddof=0).replace(0, 1)
-    z_scores = ((X - X.mean()) / std).abs()
-    frame = frame[(z_scores < 3).all(axis=1)]
-
-    return frame.reset_index(drop=True), home_encoder
-
-
-@st.cache_resource(show_spinner=True)
-def train_models() -> dict:
-    raw_df = load_data()
-    cleaned_df, home_encoder = clean_training_frame(raw_df)
-
-    X = cleaned_df.drop(columns=["default"])
-    y = cleaned_df["default"].astype(int)
-
-    if y.nunique() < 2:
-        raise ValueError("The dataset needs at least two target classes in default.")
-
-    stratify = y if y.value_counts().min() >= 2 else None
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42,
-        stratify=stratify,
-    )
-
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-
-    logistic_model = LogisticRegression(max_iter=1000)
-    logistic_model.fit(X_train_scaled, y_train)
-    logistic_pred = logistic_model.predict(X_test_scaled)
-
-    svm_model = SVC(probability=True, kernel="rbf", C=3, gamma="scale")
-    svm_model.fit(X_train_scaled, y_train)
-    svm_pred = svm_model.predict(X_test_scaled)
-
-    numeric_ranges = {
-        column: (
-            int(cleaned_df[column].min()),
-            int(cleaned_df[column].max()),
-            max(1, int((cleaned_df[column].max() - cleaned_df[column].min()) // 100 or 1)),
-            int(cleaned_df[column].median()),
-        )
-        for column in [
-            "age",
-            "income",
-            "loan_amount",
-            "loan_term_months",
-            "credit_score",
-            "employment_years",
-            "num_prior_defaults",
-        ]
-        if column in cleaned_df.columns
+# Custom CSS for premium design
+st.markdown("""
+<style>
+    /* Main background */
+    .stApp {
+        background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+        color: #c9d1d9;
+        font-family: 'Inter', sans-serif;
     }
-
-    return {
-        "cleaned_df": cleaned_df,
-        "feature_columns": list(X.columns),
-        "home_encoder": home_encoder,
-        "home_choices": home_encoder.classes_.astype(str).tolist(),
-        "purpose_choices": sorted(raw_df["purpose"].astype(str).unique().tolist()) if "purpose" in raw_df.columns else DEFAULT_PURPOSE_CHOICES,
-        "scaler": scaler,
-        "logistic_accuracy": accuracy_score(y_test, logistic_pred),
-        "svm_model": svm_model,
-        "svm_accuracy": accuracy_score(y_test, svm_pred),
-        "svm_report": classification_report(y_test, svm_pred, zero_division=0),
-        "svm_confusion_matrix": confusion_matrix(y_test, svm_pred),
-        "best_params": {"C": 3, "gamma": "scale", "kernel": "rbf"},
-        "numeric_ranges": numeric_ranges,
+    
+    /* Headers */
+    h1, h2, h3, h4, h5, h6 {
+        color: #58a6ff !important;
+        font-weight: 600;
+        letter-spacing: -0.5px;
     }
+    
+    /* Metrics */
+    [data-testid="stMetricValue"] {
+        color: #58a6ff !important;
+    }
+    
+    /* Buttons */
+    .stButton > button {
+        background: linear-gradient(90deg, #238636 0%, #2ea043 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        padding: 0.5rem 1rem;
+        transition: all 0.2s ease-in-out;
+        width: 100%;
+        box-shadow: 0 4px 15px rgba(46, 160, 67, 0.4);
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(46, 160, 67, 0.6);
+        background: linear-gradient(90deg, #2ea043 0%, #3fb950 100%);
+        color: white;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-
-def blank_number_input(column: str, label: str | None = None) -> int | None:
-    field_label = label or column.replace("_", " ").title()
-    raw_value = st.text_input(field_label, placeholder=f"Enter {field_label}")
-    if not raw_value.strip():
-        return None
-
-    try:
-        return int(raw_value)
-    except ValueError:
-        st.error(f"{field_label} must be a whole number.")
-        return None
-
-
-def clamp(value: float, lower: int, upper: int) -> int:
-    return int(max(lower, min(upper, round(value))))
-
-
-def estimate_credit_score(
-    age: int,
-    income: int,
-    loan_amount: int,
-    loan_term_months: int,
-    employment_years: int,
-    home_ownership: str,
-) -> int:
-    home_bonus = {"rent": -25, "mortgage": -10, "own": 10}.get(home_ownership, 0)
-    debt_pressure = (loan_amount / max(income, 1)) * 140
-    age_factor = max(0, 40 - age) * 2
-    employment_bonus = employment_years * 4
-    term_pressure = loan_term_months * 0.8
-    estimated = 820 - debt_pressure - age_factor - term_pressure + employment_bonus + home_bonus
-    return clamp(estimated, 338, 850)
-
-
-def estimate_num_prior_defaults(
-    credit_score: int,
-    income: int,
-    loan_amount: int,
-    employment_years: int,
-) -> int:
-    risk = ((700 - credit_score) / 90) + ((loan_amount / max(income, 1)) * 2.5) - (employment_years / 12)
-    return clamp(risk, 0, 3)
-st.title(APP_TITLE)
-st.write("Enter the borrower details below and predict default risk.")
+@st.cache_resource
+def load_assets():
+    model = joblib.load('credit_risk_model.pkl')
+    le = joblib.load('home_ownership_encoder.pkl')
+    return model, le
 
 try:
-    trained = train_models()
-except Exception as exc:
-    st.error(f"Could not train the model: {exc}")
+    model, le = load_assets()
+except Exception as e:
+    st.error(f"Model assets not found. Error: {str(e)}")
     st.stop()
 
-st.subheader("Prediction inputs")
+# Header Section
+st.title("🛡️ TrustMetrics")
+st.markdown("Enter applicant data below to perform real-time credit default risk assessment using advanced SVM model.")
+st.markdown("---")
 
-with st.form("prediction_form"):
-    left, right = st.columns(2)
+# Layout
+col1, col2 = st.columns([1, 1], gap="large")
 
-    with left:
-        age = blank_number_input("age")
-        income = blank_number_input("income", "Income (LKR)")
-        loan_amount = blank_number_input("loan_amount", "Loan Amount (LKR)")
-        loan_term_months = blank_number_input("loan_term_months")
+with col1:
+    st.subheader("👤 Applicant Profile")
+    age = st.number_input("Age", min_value=18, max_value=100, value=30, step=1)
+    income = st.number_input("Annual Income ($)", min_value=10000, max_value=1000000, value=60000, step=1000)
+    employment_years = st.number_input("Years of Employment", min_value=0, max_value=50, value=5, step=1)
+    
+    home_ownership_options = list(le.classes_)
+    home_ownership = st.selectbox("Home Ownership", home_ownership_options)
 
-    with right:
-        employment_years = blank_number_input("employment_years")
-        home_ownership = st.selectbox("Home Ownership", trained["home_choices"] or DEFAULT_HOME_CHOICES, index=None, placeholder="Select one")
-        purpose_choices = [PURPOSE_LABELS.get(choice, choice.replace("_", " ").title()) for choice in (trained["purpose_choices"] or DEFAULT_PURPOSE_CHOICES)]
-        purpose = st.selectbox("Purpose", purpose_choices, index=None, placeholder="Select one")
+with col2:
+    st.subheader("💳 Credit Information")
+    loan_amount = st.number_input("Loan Amount Requested ($)", min_value=1000, max_value=2000000, value=25000, step=1000)
+    loan_term_months = st.number_input("Loan Term (Months)", min_value=6, max_value=360, value=36, step=6)
+    num_prior_defaults = st.number_input("Previous Unpaid Debts (Defaults)", min_value=0, max_value=20, value=0, step=1)
 
-    submitted = st.form_submit_button("Predict Risk")
+st.markdown("---")
 
-if submitted:
-    required_fields = {
-        "Age": age,
-        "Income": income,
-        "Loan amount": loan_amount,
-        "Loan term months": loan_term_months,
-        "Employment years": employment_years,
-        "Home ownership": home_ownership,
-        "Purpose": purpose,
-    }
-    missing_fields = [label for label, value in required_fields.items() if value in (None, "")]
-    if missing_fields:
-        st.error("Please fill in: " + ", ".join(missing_fields))
-        st.stop()
+# Calculate estimated credit score dynamically
+base_score = 650
+score_emp = min(employment_years * 8, 100)
+score_def = min(num_prior_defaults * 75, 300)
+score_inc = min((income / 10000) * 3, 50)
+score_dti = min((loan_amount / income) * 20, 100) if income > 0 else 100
 
-    credit_score = estimate_credit_score(
-        age=age,
-        income=income,
-        loan_amount=loan_amount,
-        loan_term_months=loan_term_months,
-        employment_years=employment_years,
-        home_ownership=str(home_ownership),
-    )
-    num_prior_defaults = estimate_num_prior_defaults(
-        credit_score=credit_score,
-        income=income,
-        loan_amount=loan_amount,
-        employment_years=employment_years,
-    )
+credit_score = int(base_score + score_emp - score_def + score_inc - score_dti)
+credit_score = max(300, min(850, credit_score))
 
-    model_input = pd.DataFrame(
-        {
-            "age": [age],
-            "income": [income],
-            "loan_amount": [loan_amount],
-            "loan_term_months": [loan_term_months],
-            "credit_score": [credit_score],
-            "employment_years": [employment_years],
-            "num_prior_defaults": [num_prior_defaults],
-            "home_ownership": [trained["home_encoder"].transform([str(home_ownership)])[0]],
-        }
-    )
+st.subheader("📈 Estimated Credit Profile")
+st.info(f"Based on the provided applicant data (Income, Employment History, Prior Defaults, and requested Loan), the **Estimated Credit Score is: {credit_score}**.")
 
-    scaled_input = trained["scaler"].transform(model_input)
-    probability = float(trained["svm_model"].predict_proba(scaled_input)[0][1])
-    prediction = int(trained["svm_model"].predict(scaled_input)[0])
-    risk_label = "Default likely" if prediction == 1 else "Default unlikely"
-
-    st.success(f"Prediction: {risk_label}")
-    st.metric("Predicted default probability", f"{probability:.1%}")
-    st.write(f"Estimated prior defaults: {num_prior_defaults}")
-
-    result_left, result_right = st.columns(2)
-    result_left.write("Classification report")
-    result_left.code(trained["svm_report"])
-    result_right.write("Confusion matrix")
-    result_right.dataframe(
-        pd.DataFrame(
-            trained["svm_confusion_matrix"],
-            index=["Actual 0", "Actual 1"],
-            columns=["Pred 0", "Pred 1"],
-        )
-    )
-
-st.subheader("Model summary")
-summary_left, summary_right = st.columns(2)
-
-with summary_left:
-    with st.container(border=True):
-        st.metric("Logistic Regression Accuracy", f"{trained['logistic_accuracy']:.3f}")
-
-with summary_right:
-    with st.container(border=True):
-        st.metric("SVM Accuracy", f"{trained['svm_accuracy']:.3f}")
+# Prediction action
+if st.button("🚀 Analyze Risk Profile"):
+    with st.spinner("Analyzing data through SVM pipeline..."):
+        time.sleep(1) # Micro-animation effect
+        
+        # Prepare input
+        home_ownership_encoded = le.transform([home_ownership])[0]
+        
+        input_data = pd.DataFrame({
+            'age': [age],
+            'income': [income],
+            'loan_amount': [loan_amount],
+            'loan_term_months': [loan_term_months],
+            'credit_score': [credit_score],
+            'employment_years': [employment_years],
+            'num_prior_defaults': [num_prior_defaults],
+            'home_ownership': [home_ownership_encoded]
+        })
+        
+        # Predict
+        prob = model.predict_proba(input_data)[0][1] # Probability of default
+        pred = model.predict(input_data)[0]
+        
+        # Display Results
+        st.subheader("📊 Assessment Results")
+        
+        res_col1, res_col2 = st.columns(2)
+        
+        with res_col1:
+            if pred == 1:
+                st.error("🚨 **HIGH RISK**: Application flagged for potential default.")
+            else:
+                st.success("✅ **LOW RISK**: Application looks solid.")
+                
+            st.metric("Risk of Non-Payment (Default Likelihood)", f"{prob * 100:.2f}%")
+            
+        with res_col2:
+            st.info("💡 **Insights**")
+            if prob > 0.5:
+                st.write("- Consider requesting additional collateral or a co-signer due to the elevated risk score.")
+                if num_prior_defaults > 0:
+                    st.write("- **Warning**: Prior defaults significantly increase risk.")
+                if credit_score < 650:
+                    st.write("- **Warning**: Low credit score is a major negative factor.")
+            else:
+                st.write("- Applicant exhibits strong trust metrics.")
+                if income > loan_amount / 3:
+                    st.write("- Good income-to-loan ratio.")
+                if credit_score >= 720:
+                    st.write("- Excellent credit history.")
